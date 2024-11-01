@@ -47,7 +47,7 @@
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
         <mxCell id="ooTEefm5wgO5lJ6nr4RK-32" value="&lt;font face=&quot;Lucida Console&quot;&gt;Evaluarea performanței&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;shadow=1;strokeWidth=2;fontSize=20;" vertex="1" parent="1">
-          <mxGeometry x="662.75" y="822" width="244.5" height="126" as="geometry" />
+          <mxGeometry x="649" y="822" width="244.5" height="126" as="geometry" />
         </mxCell>
         <mxCell id="ooTEefm5wgO5lJ6nr4RK-35" value="&lt;font style=&quot;font-size: 14px;&quot; face=&quot;Lucida Console&quot;&gt;Măsurarea acurateței folosind un set de date de test&lt;/font&gt;" style="text;strokeColor=none;fillColor=none;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=16;" vertex="1" parent="1">
           <mxGeometry x="662.75" y="957" width="270" height="30" as="geometry" />
@@ -66,6 +66,9 @@
         </mxCell>
         <mxCell id="ooTEefm5wgO5lJ6nr4RK-43" value="&lt;font face=&quot;Lucida Console&quot;&gt;Procesarea rezultatelor&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;shadow=1;strokeWidth=2;fontSize=20;" vertex="1" parent="1">
           <mxGeometry x="1038.5" y="572" width="244.5" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="ooTEefm5wgO5lJ6nr4RK-45" value="&lt;font face=&quot;Lucida Console&quot;&gt;Estimarea direcției privirii și detecția atenției, analizând consistența privrii pentru a determina zonele de atenție focalizată sau distragere&lt;/font&gt;" style="text;strokeColor=none;fillColor=none;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=16;" vertex="1" parent="1">
+          <mxGeometry x="1026.5" y="1023" width="289.25" height="30" as="geometry" />
         </mxCell>
       </root>
     </mxGraphModel>
