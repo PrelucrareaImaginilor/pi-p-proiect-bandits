@@ -1,134 +1,99 @@
 import cv2
-import dlib
-from scipy.spatial import distance as dist
+import mediapipe as mp
 import numpy as np
-import time
-import cv2
+from collections import deque
+from contextlib import contextmanager
 
-#folosim dlib pentru a detecta fata si ochii
-face_detector = dlib.get_frontal_face_detector()
-predictor = dlib.shape_predictor("../shape_predictor_68_face_landmarks.dat")
+# Configurație pentru vizualizarea și analiza clipirii
+WINDOW_NAME = 'Debug feed'
+EAR_QUEUE_SIZE = 100
+EAR_DISPLAY_SCALE = 100
+GRAPH_OFFSET_X = 10
+GRAPH_OFFSET_Y = 100
 
-#pragul pentru Eye Aspect Ratio (EAR) si cadre consecutive pentru detectarea clipirilor
-EAR_THRESHOLD = 0.25
-CONSECUTIVE_FRAMES = 3
+# Punctele de reper pentru detectarea ochilor conform modelului MediaPipe Face Mesh
+LEFT_EYE_INDICES = np.array([33, 160, 158, 133, 153, 144])
+RIGHT_EYE_INDICES = np.array([362, 385, 387, 263, 373, 380])
 
-#variabile pentru detectarea clipirilor
-blink_counter = 0
-total_blinks = 0
-ear_values = []
-interval_blinks = 0  #counter pentru clipirile din interval
-interval_duration = 5  #intervalul de timp pentru calcularea ratei de clipire
-total_intervals = 0  #numarul total de intervale
-total_blinks_all_intervals = 0  # numarul total de clipiri din toate intervalele
-last_blink_time = time.time()  #durata ultimei clipiri
 
-#functia de calcul Eye Aspect Ratio (EAR)
-def eye_aspect_ratio(eye):
-    A = dist.euclidean(eye[1], eye[5])
-    B = dist.euclidean(eye[2], eye[4])
-    C = dist.euclidean(eye[0], eye[3])
-    return (A + B) / (2.0 * C)
+@contextmanager
+def video_capture(source=0):
+    # Gestionează automat eliberarea resurselor camerei la încheierea programului
+    cap = cv2.VideoCapture(source)
+    try:
+        if not cap.isOpened():
+            raise RuntimeError("Nu s-a putut deschide camera.")
+        yield cap
+    finally:
+        cap.release()
+        cv2.destroyAllWindows()
 
-#functia de mediere a valorilor EAR
-def smooth_ear(ear_values, window_size=5):
-    if len(ear_values) < window_size:
-        return np.mean(ear_values)
-    return np.mean(ear_values[-window_size:])
 
-# initializam camera
-cam = cv2.VideoCapture(0)
+def calculate_ear_vectorized(landmarks, eye_indices):
+    # Calculează raportul de aspect al ochiului (EAR) cu vectorizare
+    points = np.array([[landmarks[idx].x, landmarks[idx].y] for idx in eye_indices])
+    vert1 = np.linalg.norm(points[1] - points[5])
+    vert2 = np.linalg.norm(points[2] - points[4])
+    horz = np.linalg.norm(points[0] - points[3])
+    return (vert1 + vert2) / (2.0 * horz)
 
-# scrierea datelor
-with open('blink_rate.txt', 'w') as file:
-    file.write("Timestamp       | Rata de Clipire (blinks/sec) | Total Clipiri | EAR Medie\n")
-    file.write("------------------------------------------------------------------------\n")
 
-    interval_start = time.time()
+def draw_ear_graph(frame, ear_values):
+    # Desenează graficul EAR în timp real
+    if len(ear_values) < 2:
+        return
+    points = np.array([(GRAPH_OFFSET_X + i, GRAPH_OFFSET_Y - int(ear * EAR_DISPLAY_SCALE))
+                       for i, ear in enumerate(ear_values)])
+    cv2.polylines(frame, [points.reshape((-1, 1, 2))], False, (0, 255, 0), 2)
 
-    while True:
-        ret, frame = cam.read()
-        if not ret:
-            break
 
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        faces = face_detector(gray)
+def process_frame(frame, face_mesh, mp_face_mesh, mp_drawing, mp_drawing_styles, ear_values):
+    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    results = face_mesh.process(rgb_frame)
 
-        for face in faces:
-            #coordonatele fetei
-            x, y, w, h = face.left(), face.top(), face.width(), face.height()
-            landmarks = predictor(gray, face)
-            #coordonatele ochilor
-            left_eye = [(landmarks.part(i).x, landmarks.part(i).y) for i in range(36, 42)]
-            right_eye = [(landmarks.part(i).x, landmarks.part(i).y) for i in range(42, 48)]
+    if results.multi_face_landmarks:
+        for face_landmarks in results.multi_face_landmarks:
+            # Desenează landmark-urile pt debugging
+            mp_drawing.draw_landmarks(
+                image=frame,
+                landmark_list=face_landmarks,
+                connections=mp_face_mesh.FACEMESH_TESSELATION,
+                landmark_drawing_spec=None,
+                connection_drawing_spec=mp_drawing_styles.get_default_face_mesh_tesselation_style())
 
-            #conturul fetei si al ochilor
-            cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 0, 0), 2)
-            for (lx, ly) in left_eye:
-                cv2.circle(frame, (lx, ly), 2, (0, 255, 0), -1)
-            for (rx, ry) in right_eye:
-                cv2.circle(frame, (rx, ry), 2, (0, 255, 0), -1)
-
-            left_ear = eye_aspect_ratio(left_eye)
-            right_ear = eye_aspect_ratio(right_eye)
-            ear = (left_ear + right_ear) / 2.0 #media EAR pentru ambii ochi
+            # Media EAR a ambilor ochi pentru a detecta clipirea
+            left_ear = calculate_ear_vectorized(face_landmarks.landmark, LEFT_EYE_INDICES)
+            right_ear = calculate_ear_vectorized(face_landmarks.landmark, RIGHT_EYE_INDICES)
+            ear = (left_ear + right_ear) / 2.0
             ear_values.append(ear)
-            smoothed_ear = smooth_ear(ear_values)
 
-            # daca EAR este mai mic decat pragul, incrementam counter-ul
-            if smoothed_ear < EAR_THRESHOLD:
-                blink_counter += 1
-            else:
-                #daca detectam o clipire, incrementam numarul total de clipiri si numarul de clipiri din interval
-                if blink_counter >= CONSECUTIVE_FRAMES:
-                    total_blinks += 1
-                    interval_blinks += 1  #incrementam numarul de clipiri din interval
-                    last_blink_time = time.time()  #update ultima clipire
-                blink_counter = 0
-
-            cv2.putText(frame, f"EAR: {smoothed_ear:.2f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-            cv2.putText(frame, f"Blinks: {total_blinks}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-
-        # calculam rata de clipire pentru fiecare interval de 5 secunde
-        current_time = time.time()
-        if current_time - interval_start >= interval_duration:
-
-            blink_rate = interval_blinks / interval_duration  # Blinks per second in this interval
-            timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(current_time)) #timestamp-ul intervalului
-            smoothed_ear = smooth_ear(ear_values)
+            cv2.putText(frame, f'EAR: {ear:.2f}', (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)
+            draw_ear_graph(frame, ear_values)
 
 
-            file.write(f"{timestamp} | {blink_rate:.2f}                     | {interval_blinks}             | {smoothed_ear:.2f}\n")
-            file.flush()  #asiguram ca datele sunt scrise pe disc
+def main():
+    # Inițializează componentele necesare pentru detecția feței și analiza ochilor
+    mp_face_mesh = mp.solutions.face_mesh
+    face_mesh = mp_face_mesh.FaceMesh()
+    mp_drawing = mp.solutions.drawing_utils
+    mp_drawing_styles = mp.solutions.drawing_styles
+    ear_values = deque(maxlen=EAR_QUEUE_SIZE)  # coadă pentru grafic
 
-            # update total
-            total_intervals += 1
-            total_blinks_all_intervals += interval_blinks
+    # Bucla principală pentru procesarea prin cameră (todo: compatibilitate pt input video)
+    with video_capture(source=0) as cap:
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                print("Eroare: Nu s-a putut citi cadrul.")
+                break
 
-            #resetam intervalul de timp si numarul de clipiri din interval
-            interval_start = current_time
-            interval_blinks = 0
+            process_frame(frame, face_mesh, mp_face_mesh, mp_drawing, mp_drawing_styles, ear_values)
+            cv2.imshow(WINDOW_NAME, frame)
+
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
 
 
-        blink_rate = interval_blinks / interval_duration  # clipirile pe secunda in acest interval
-        #cv2.putText(frame, f"Blink Rate: {blink_rate:.2f} blinks/sec", (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-
-        # verificam daca nu s-a detectat nicio clipire in ultimele 10 secunde
-        if current_time - last_blink_time >= 10:
-            cv2.putText(frame, "No blink detected for 10 seconds!", (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-
-        # afiseaza frame-ul cu detectia fetei si a ochilor
-        cv2.imshow('Face and Eye Detection with Blink Detection', frame)
-
-        # iesirea din program la apasarea tastei 'q'
-        if cv2.waitKey(1) == ord('q'):
-            break
-
-    # calculam media numarului de clipiri per interval
-    if total_intervals > 0:
-        average_blinks = total_blinks_all_intervals / total_intervals
-        print(f"Media numărului de clipiri per interval: {average_blinks:.2f}")
-
-#inchidem camera si fisierele
-cam.release()
-cv2.destroyAllWindows()
+if __name__ == '__main__':
+    main()
