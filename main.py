@@ -3,6 +3,7 @@ import mediapipe as mp
 import numpy as np
 from collections import deque
 from contextlib import contextmanager
+import time
 
 # Constante pentru vizualizarea și analiza clipirii
 WINDOW_NAME = 'Debug feed'
@@ -14,6 +15,11 @@ GRAPH_OFFSET_Y = 100
 # Punctele de reper pentru detectarea ochilor conform modelului MediaPipe Face Mesh
 LEFT_EYE_INDICES = np.array([33, 160, 158, 133, 153, 144])
 RIGHT_EYE_INDICES = np.array([362, 385, 387, 263, 373, 380])
+
+# Constante pentru detectarea clipirii
+BLINK_MIN_DURATION = 0.1 # secunde
+BLINK_MAX_DURATION = 0.4
+BLINK_THRESHOLD_OFFSET = 0.16
 
 
 @contextmanager
@@ -52,7 +58,30 @@ def draw_ear_graph(frame, ear_values):
     cv2.polylines(frame, [points], False, (0, 255, 0), 2)
 
 
-def process_frame(frame, face_mesh, mp_face_mesh, mp_drawing, mp_drawing_styles, ear_values, running_sum):
+class BlinkDetector:
+    def __init__(self):
+        self.blink_start = None
+        self.is_blinking = False
+        self.blink_count = 0
+        self.last_blink_time = time.time()
+
+    def update(self, ear, threshold):
+        current_time = time.time()
+        
+        if not self.is_blinking and ear < threshold:
+            self.is_blinking = True
+            self.blink_start = current_time
+        elif self.is_blinking and ear >= threshold:
+            self.is_blinking = False
+            if self.blink_start is not None:
+                blink_duration = current_time - self.blink_start
+                if BLINK_MIN_DURATION <= blink_duration <= BLINK_MAX_DURATION:
+                    self.blink_count += 1
+                    self.last_blink_time = current_time
+            self.blink_start = None
+
+
+def process_frame(frame, face_mesh, mp_face_mesh, mp_drawing, mp_drawing_styles, ear_values, running_sum, blink_detector):
     rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     results = face_mesh.process(rgb_frame)
 
@@ -79,17 +108,30 @@ def process_frame(frame, face_mesh, mp_face_mesh, mp_drawing, mp_drawing_styles,
             
             # Folosește suma rulantă pentru medie
             rolling_avg = running_sum[0] / len(ear_values)
+            blink_threshold = -0.933 + 11.726/9.112 * (1 - np.exp(-9.112 * rolling_avg)) # todo: altă formulă
+            
+            # Actualizează detecția clipirii
+            blink_detector.update(ear, blink_threshold)
 
             # Afișează valorile
             cv2.putText(frame, f'EAR: {ear:.2f} Avg: {rolling_avg:.2f}', (10, 30),
                         cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)
+            cv2.putText(frame, f'Blinks: {blink_detector.blink_count}', (10, 60),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)
 
-            # Desenează linia mediei rulante (todo: ignoră valorile EAR la clipiri)
+            # Desenează media rulante (todo: ignoră valorile EAR la clipiri)
             avg_line_y = GRAPH_OFFSET_Y - int(rolling_avg * EAR_DISPLAY_SCALE)
             cv2.line(frame,
                      (GRAPH_OFFSET_X, avg_line_y),
                      (GRAPH_OFFSET_X + len(ear_values), avg_line_y),
-                     (0, 0, 255), 5)
+                     (0, 0, 255), 2)
+
+            # Desenează threshold-ul
+            threshold_y = GRAPH_OFFSET_Y - int(blink_threshold * EAR_DISPLAY_SCALE)
+            cv2.line(frame,
+                     (GRAPH_OFFSET_X, threshold_y),
+                     (GRAPH_OFFSET_X + len(ear_values), threshold_y),
+                     (255, 0, 0), 2)
 
             draw_ear_graph(frame, ear_values)
 
@@ -102,6 +144,7 @@ def main():
     mp_drawing_styles = mp.solutions.drawing_styles
     ear_values = deque(maxlen=EAR_QUEUE_SIZE)  # coadă pentru grafic
     running_sum = [0.0]  # Folosim listă pentru referință mutabilă
+    blink_detector = BlinkDetector()
 
     # Bucla principală pentru procesarea prin cameră (todo: compatibilitate pentru input video)
     with video_capture(source=0) as cap:
@@ -112,7 +155,7 @@ def main():
                 break
 
             process_frame(frame, face_mesh, mp_face_mesh, mp_drawing, 
-                        mp_drawing_styles, ear_values, running_sum)
+                        mp_drawing_styles, ear_values, running_sum, blink_detector)
             cv2.imshow(WINDOW_NAME, frame)
 
             if cv2.waitKey(1) & 0xFF == ord('q'):
