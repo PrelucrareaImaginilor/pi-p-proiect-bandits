@@ -5,32 +5,39 @@ from collections import deque
 from contextlib import contextmanager
 import time
 from datetime import datetime
+# Add new imports
+import matplotlib.pyplot as plt
+import pandas as pd
+from matplotlib.gridspec import GridSpec
 
-# Constante pentru vizualizare și analiză clipiri
+# Constante pentru afișare și detectare clipiri
 WINDOW_NAME = 'Debug feed'
 EAR_QUEUE_SIZE = 100
 EAR_DISPLAY_SCALE = 100
 GRAPH_OFFSET_X = 10
 GRAPH_OFFSET_Y = 100
 
-# Punctele de reper pentru detectarea ochilor conform modelului MediaPipe Face Mesh
+# Puncte reper ochi pentru Face Mesh
 LEFT_EYE_INDICES = np.array([33, 160, 158, 133, 153, 144])
 RIGHT_EYE_INDICES = np.array([362, 385, 387, 263, 373, 380])
 IRIS_CENTER_LEFT = 468
 IRIS_CENTER_RIGHT = 473
 
-# Constante pentru detectarea clipirii
+# Constante clipire
 BLINK_MIN_DURATION = 0.1  # secunde
 BLINK_MAX_DURATION = 0.4
 BLINK_THRESHOLD_OFFSET = 0.16
 
-# Add LOGGING_INTERVAL constant
-LOGGING_INTERVAL = 5  # seconds
+# Interval jurnalizare
+LOGGING_INTERVAL = 5  # secunde
+
+# Amplificare mișcare privire
+GAZE_AMPLIFICATION_X = 1.5  # Amplificare orizontală
+GAZE_AMPLIFICATION_Y = 1.5  # Amplificare verticală
 
 
 def save_blink_data(blink_data):
     filename = "blink_rate.txt"
-    # Adjust column widths
     col_widths = {
         'timestamp': 17,
         'ear': 7,
@@ -41,7 +48,6 @@ def save_blink_data(blink_data):
         'rate': 8,
         'blink_cat': 10
     }
-    # Create separator lines
     separator = (f"+{'-' * col_widths['timestamp']}"
                  f"+{'-' * col_widths['ear']}"
                  f"+{'-' * col_widths['avg_ear']}"
@@ -50,7 +56,6 @@ def save_blink_data(blink_data):
                  f"+{'-' * col_widths['blinks_total']}"
                  f"+{'-' * col_widths['rate']}"
                  f"+{'-' * col_widths['blink_cat']}+")
-    # Prepare lines
     lines = [
         separator,
         f"|{'Data & Ora':^{col_widths['timestamp']}}"
@@ -63,7 +68,6 @@ def save_blink_data(blink_data):
         f"|{'Blink Cat':^{col_widths['blink_cat']}}|",
         separator
     ]
-    # Add data rows
     for data in blink_data:
         lines.append(
             f"|{data['timestamp']:^{col_widths['timestamp']}}"
@@ -76,7 +80,6 @@ def save_blink_data(blink_data):
             f"|{data['blink_category']:^{col_widths['blink_cat']}}|"
         )
     lines.append(separator)
-    # Write all lines
     with open(filename, "w") as file:
         file.write('\n'.join(lines))
     return filename
@@ -151,7 +154,7 @@ def detect_eye_direction(landmarks, left_eye_indices, right_eye_indices, iris_ce
 
     left_horizontal_ratio = (iris_left[0] - left_eye[0, 0]) / (left_eye[3, 0] - left_eye[0, 0])
     left_vertical_ratio = (iris_left[1] - left_eye[1, 1]) / (left_eye[4, 1] - left_eye[1, 1])
-
+# todo: mai eficient...
     right_horizontal_ratio = (iris_right[0] - right_eye[0, 0]) / (right_eye[3, 0] - right_eye[0, 0])
     right_vertical_ratio = (iris_right[1] - right_eye[1, 1]) / (right_eye[4, 1] - right_eye[1, 1])
 
@@ -175,14 +178,14 @@ class BlinkDetector:
         self.blink_start = None
         self.is_blinking = False
         self.blink_count = 0
-        self.blink_timestamps = []  # Store timestamps of blinks
+        self.blink_timestamps = []  # Stochează timpii clipirilor
         self.blink_rate = 0.0
-        self.previous_blink_rate = 0  # Initialize previous blink rate
+        self.previous_blink_rate = 0
 
     def update(self, ear, threshold):
         current_time = time.time()
         
-        # Update blink detection
+        # Actualizare detectare clipire
         if not self.is_blinking and ear < threshold:
             self.is_blinking = True
             self.blink_start = current_time
@@ -195,14 +198,14 @@ class BlinkDetector:
                     self.blink_count += 1
             self.blink_start = None
 
-        # Remove blinks older than 60 seconds
+        # Elimină clipirile mai vechi de 60 secunde
         cutoff_time = current_time - 60
         self.blink_timestamps = [t for t in self.blink_timestamps if t > cutoff_time]
         
-        # Calculate rolling blink rate
+        # Calculează rata clipirilor
         self.blink_rate = len(self.blink_timestamps)
         
-        # Check if blink rate has changed
+        # Verifică dacă s-a schimbat rata
         rate_changed = self.blink_rate != self.previous_blink_rate
         self.previous_blink_rate = self.blink_rate  # Update previous blink rate
         
@@ -251,7 +254,7 @@ def get_pupil_position(eye_image):
     return None
 
 def process_frame(frame, face_mesh, mp_face_mesh, mp_drawing, mp_drawing_styles, ear_values, running_sum,
-                  blink_detector, blink_data, eye_movement_data):
+                  blink_detector, blink_data, eye_movement_data, gaze_canvas):
     current_time = time.time()
     # Add static variables for logging
     if not hasattr(process_frame, "last_log_time"):
@@ -344,27 +347,54 @@ def process_frame(frame, face_mesh, mp_face_mesh, mp_drawing, mp_drawing_styles,
                 left_eye_width = left_eye_image.shape[1]
                 left_pupil_ratio = left_pupil[0] / left_eye_width
             else:
-                left_pupil_ratio = 0.5  # Default to center if not found
+                left_pupil_ratio = 0.5  # daca nu gasim, pune-l in mijloc
 
             if right_pupil:
                 right_eye_width = right_eye_image.shape[1]
                 right_pupil_ratio = right_pupil[0] / right_eye_width
             else:
-                right_pupil_ratio = 0.5  # Default to center if not found
+                right_pupil_ratio = 0.5
 
-            # Average the ratios
+            # m.a.
             horizontal_ratio = (left_pupil_ratio + right_pupil_ratio) / 2
 
-            # Determine eye direction based on pupil position
-            if horizontal_ratio < 0.4:
-                direction = "Left"
-            elif horizontal_ratio > 0.6:
-                direction = "Right"
+            # calcule si pe verticala
+            if left_pupil:
+                left_eye_height = left_eye_image.shape[0]
+                left_pupil_vertical_ratio = left_pupil[1] / left_eye_height
             else:
-                direction = "Center"
+                left_pupil_vertical_ratio = 0.5
 
-            # Update eye movement data
-            eye_movement_data[direction] += 1
+            if right_pupil:
+                right_eye_height = right_eye_image.shape[0]
+                right_pupil_vertical_ratio = right_pupil[1] / right_eye_height
+            else:
+                right_pupil_vertical_ratio = 0.5
+
+            vertical_ratio = (left_pupil_vertical_ratio + right_pupil_vertical_ratio) / 2
+
+            # Oglindește axele si amplifica privirea
+            x_offset = (horizontal_ratio - 0.5) * GAZE_AMPLIFICATION_X
+            y_offset = (vertical_ratio - 0.5) * GAZE_AMPLIFICATION_Y
+            
+            # Inversează axele și convertește la coordonate ecran
+            gaze_x = int((0.5 - x_offset) * gaze_canvas.shape[1])
+            gaze_y = int((0.5 - y_offset) * gaze_canvas.shape[0])
+            
+            # Limitează coordonatele la dimensiunile ecranului
+            gaze_x = np.clip(gaze_x, 0, gaze_canvas.shape[1] - 1)
+            gaze_y = np.clip(gaze_y, 0, gaze_canvas.shape[0] - 1)
+
+            # Șterge canvas-ul
+            gaze_canvas[:] = (0, 0, 0)
+
+            # Desenează punct privire și reticul
+            cv2.circle(gaze_canvas, (gaze_x, gaze_y), 10, (0, 0, 255), -1)
+            cv2.line(gaze_canvas, (gaze_x, 0), (gaze_x, gaze_canvas.shape[0]), (0, 255, 0), 1)
+            cv2.line(gaze_canvas, (0, gaze_y), (gaze_canvas.shape[1], gaze_y), (0, 255, 0), 1)
+
+            # Afișează fereastra de urmărire privire
+            cv2.imshow('Punct Privire', gaze_canvas)
 
             # Draw pupil centers on eye images for visualization (optional)
             if left_pupil:
@@ -372,10 +402,47 @@ def process_frame(frame, face_mesh, mp_face_mesh, mp_drawing, mp_drawing_styles,
             if right_pupil:
                 cv2.circle(right_eye_image, right_pupil, 2, (0, 255, 0), -1)
 
+def plot_blink_analysis(blink_data):
+    # Convert data for plotting
+    df = pd.DataFrame(blink_data)
+    df['timestamp'] = pd.to_datetime(df['timestamp'], format='%d.%m.%y %H:%M:%S')
+
+    fig = plt.figure(figsize=(12, 8))
+    gs = GridSpec(2, 2, figure=fig)
+    
+    # Plot 1: EAR over time
+    ax1 = fig.add_subplot(gs[0, :])
+    ax1.plot(df['timestamp'], df['ear'], 'b-', label='EAR')
+    ax1.plot(df['timestamp'], df['average_ear'], 'r-', label='Average EAR')
+    ax1.set_title('Eye Aspect Ratio Over Time')
+    ax1.set_xlabel('Time')
+    ax1.set_ylabel('EAR')
+    ax1.legend()
+    ax1.grid(True)
+    
+    # Plot 2: Blink Rate over time
+    ax2 = fig.add_subplot(gs[1, 0])
+    ax2.plot(df['timestamp'], df['blink_rate'], 'g-')
+    ax2.set_title('Blink Rate Over Time')
+    ax2.set_xlabel('Time')
+    ax2.set_ylabel('Blinks per Minute')
+    ax2.grid(True)
+    
+    # Plot 3: Blinks per interval histogram
+    ax3 = fig.add_subplot(gs[1, 1])
+    ax3.hist(df['blinks_in_interval'], bins=max(5, len(df['blinks_in_interval'].unique())),
+             edgecolor='black')
+    ax3.set_title('Blinks Distribution per Interval')
+    ax3.set_xlabel(f'Blinks per {LOGGING_INTERVAL}s Interval')
+    ax3.set_ylabel('Frequency')
+    ax3.grid(True)
+    
+    plt.tight_layout()
+    plt.show()
 
 def main():
     mp_face_mesh = mp.solutions.face_mesh
-    face_mesh = mp_face_mesh.FaceMesh(refine_landmarks=True)  # Refine landmarks to include iris points
+    face_mesh = mp_face_mesh.FaceMesh(refine_landmarks=True)  # Include puncte iris
     mp_drawing = mp.solutions.drawing_utils
     mp_drawing_styles = mp.solutions.drawing_styles
     ear_values = deque(maxlen=EAR_QUEUE_SIZE)
@@ -383,6 +450,9 @@ def main():
     blink_detector = BlinkDetector()
     blink_data = []
     eye_movement_data = {"Left": 0, "Right": 0, "Up": 0, "Down": 0, "Center": 0}
+
+    # Creează canvas pentru privire
+    gaze_canvas = np.zeros((500, 500, 3), dtype=np.uint8)
 
     with video_capture(source=0) as cap:
         while True:
@@ -392,14 +462,15 @@ def main():
                 break
 
             process_frame(frame, face_mesh, mp_face_mesh, mp_drawing,
-                          mp_drawing_styles, ear_values, running_sum, blink_detector, blink_data, eye_movement_data)
+                          mp_drawing_styles, ear_values, running_sum, blink_detector,
+                          blink_data, eye_movement_data, gaze_canvas)
             cv2.imshow(WINDOW_NAME, frame)
 
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
 
-    save_blink_data(blink_data)
-
+    filename = save_blink_data(blink_data)
+    plot_blink_analysis(blink_data) # plotam datele
 
 if __name__ == '__main__':
     main()
