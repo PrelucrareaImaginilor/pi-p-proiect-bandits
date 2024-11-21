@@ -162,12 +162,12 @@ def detect_eye_direction(landmarks, left_eye_indices, right_eye_indices, iris_ce
     vertical_ratio = (left_vertical_ratio + right_vertical_ratio) / 2
 
     if horizontal_ratio < 0.4:
-        return "Left"
-    elif horizontal_ratio > 0.6:
         return "Right"
-    elif vertical_ratio < 0.4:
+    elif horizontal_ratio > 0.6:
+        return "Left"
+    elif vertical_ratio < 0.25:
         return "Up"
-    elif vertical_ratio > 0.6:
+    elif vertical_ratio > 0.5:
         return "Down"
     else:
         return "Center"
@@ -415,7 +415,7 @@ def plot_blink_analysis(blink_data):
     ax1.plot(df['timestamp'], df['ear'], 'b-', label='EAR')
     ax1.plot(df['timestamp'], df['average_ear'], 'r-', label='Average EAR')
     ax1.set_title('Eye Aspect Ratio Over Time')
-    ax1.set_xlabel('Time')
+    ax1.set_xlabel('Timp')
     ax1.set_ylabel('EAR')
     ax1.legend()
     ax1.grid(True)
@@ -423,18 +423,18 @@ def plot_blink_analysis(blink_data):
     # Plot 2: Blink Rate over time
     ax2 = fig.add_subplot(gs[1, 0])
     ax2.plot(df['timestamp'], df['blink_rate'], 'g-')
-    ax2.set_title('Blink Rate Over Time')
-    ax2.set_xlabel('Time')
-    ax2.set_ylabel('Blinks per Minute')
+    ax2.set_title('Rata de clipire')
+    ax2.set_xlabel('Timp')
+    ax2.set_ylabel('Clipiri/min')
     ax2.grid(True)
     
     # Plot 3: Blinks per interval histogram
     ax3 = fig.add_subplot(gs[1, 1])
     ax3.hist(df['blinks_in_interval'], bins=max(5, len(df['blinks_in_interval'].unique())),
              edgecolor='black')
-    ax3.set_title('Blinks Distribution per Interval')
-    ax3.set_xlabel(f'Blinks per {LOGGING_INTERVAL}s Interval')
-    ax3.set_ylabel('Frequency')
+    ax3.set_title('Distributia clipirilor in timp')
+    ax3.set_xlabel(f'Clipiri/{LOGGING_INTERVAL}s')
+    ax3.set_ylabel('Frecventa')
     ax3.grid(True)
     
     plt.tight_layout()
