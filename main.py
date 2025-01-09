@@ -9,6 +9,131 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 import pandas as pd
 from matplotlib.gridspec import GridSpec
+import tkinter as tk
+from tkinter import ttk
+from tkinter import font
+import webbrowser
+
+class InstructionWindow:
+    def __init__(self):
+        self.root = tk.Tk()
+        self.root.title("Attention, bandits!")
+        self.root.geometry("800x500")
+        self.root.minsize(400, 300)
+        self.start_program = False
+        
+        self.root.grid_columnconfigure(0, weight=1)
+        self.root.grid_rowconfigure(0, weight=1)
+        self.root.grid_rowconfigure(1, weight=0)
+        
+        main_frame = ttk.Frame(self.root, padding="20")
+        main_frame.grid(row=0, column=0, sticky="nsew")
+        main_frame.grid_columnconfigure(0, weight=1)
+        main_frame.grid_rowconfigure(0, weight=1)
+        
+        title_font = font.Font(family="Helvetica", size=12, weight="bold")
+        text_font = font.Font(family="Helvetica", size=10)
+        
+        text = tk.Text(main_frame, wrap=tk.WORD, padx=10, pady=10)
+        text.grid(row=0, column=0, sticky="nsew")
+        
+        scrollbar = ttk.Scrollbar(main_frame, orient="vertical", command=text.yview)
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        text.configure(yscrollcommand=scrollbar.set)
+        
+        instructions = """
+Acest program vă va monitoriza privirea și clipirile pentru a detecta starea de atenție.
+
+Metode:
+• Real-time eye tracking
+• Detecția și contorizarea clipirilor
+• Monitorizarea direcției de privit
+• Detecția oboselii pe baza EAR (Eye Aspect Ratio)
+
+Asigurați-vă că vă aflați într-o încăpere bine iluminată, iar fața este vizibilă în cadru. Pentru cele mai bune rezultate, poziționați camera la nivelul ochilor, perpendicular cu fața.
+
+Apăsați Start pentru a începe testul, sau configurați testul în Setări.
+"""
+
+        text.tag_configure("title", font=title_font, spacing3=10)
+        text.tag_configure("body", font=text_font, spacing1=5, spacing2=5)
+        
+        text.insert("1.0", "Attention, bandits!\n", "title")
+        text.insert("end", instructions[instructions.find("Acest"):], "body")
+        text.configure(state='disabled')
+        
+        style = ttk.Style()
+        style.configure("Custom.TButton", padding=10)
+        
+        start_button = ttk.Button(self.root, text="Start", command=self.start, style="Custom.TButton")
+        start_button.grid(row=1, column=0, pady=20)
+        
+        self.center_window()
+        
+        self.root.bind('<Configure>', lambda e: self.on_resize())
+        self.root.lift()
+
+        settings_frame = ttk.LabelFrame(main_frame, text="Settings", padding="10")
+        settings_frame.grid(row=1, column=0, sticky="ew", pady=(10, 0))
+        settings_frame.grid_columnconfigure(1, weight=1)
+
+        self.media_url = tk.StringVar()
+        self.load_media = tk.BooleanVar()
+        ttk.Label(settings_frame, text="Media URL:").grid(row=0, column=0, sticky="w", padx=(0, 5))
+        ttk.Entry(settings_frame, textvariable=self.media_url).grid(row=0, column=1, sticky="ew")
+        ttk.Checkbutton(settings_frame, text="Load on start", variable=self.load_media).grid(row=0, column=2, padx=(5, 0))
+
+        self.show_debug = tk.BooleanVar(value=True)
+        ttk.Checkbutton(settings_frame, text="Show debug window", variable=self.show_debug).grid(row=1, column=0, columnspan=3, sticky="w")
+        
+    def center_window(self):
+        self.root.update_idletasks()
+        width = self.root.winfo_width()
+        height = self.root.winfo_height()
+        x = (self.root.winfo_screenwidth() // 2) - (width // 2)
+        y = (self.root.winfo_screenheight() // 2) - (height // 2)
+        self.root.geometry(f'{width}x{height}+{x}+{y}')
+        
+    def on_resize(self):
+        width = self.root.winfo_width()
+        title_size = max(12, min(20, width // 40))
+        text_size = max(10, min(16, width // 50))
+        
+        title_font = font.Font(family="Helvetica", size=title_size, weight="bold")
+        text_font = font.Font(family="Helvetica", size=text_size)
+        
+        for widget in self.root.winfo_children():
+            if isinstance(widget, tk.Text):
+                widget.tag_configure("title", font=title_font)
+                widget.tag_configure("body", font=text_font)
+
+    def start(self):
+        if self.load_media.get() and self.media_url.get().strip():
+            webbrowser.open(self.media_url.get().strip())
+        self.start_program = True
+        self.root.quit()
+        self.root.destroy()
+
+    def show(self):
+        self.root.mainloop()
+        return self.start_program
+
+class ControlWindow:
+    def __init__(self):
+        self.root = tk.Tk()
+        self.root.title("Control")
+        self.root.geometry("200x100")
+        self.running = True
+
+        ttk.Button(self.root, text="Stop", command=self.stop).pack(expand=True)
+        self.root.protocol("WM_DELETE_WINDOW", self.stop)
+
+    def stop(self):
+        self.running = False
+        self.root.destroy()
+
+    def update(self):
+        self.root.update()
 
 # Constante pentru afișare și detectare clipiri
 WINDOW_NAME = 'Debug feed'
@@ -440,7 +565,13 @@ def plot_blink_analysis(blink_data):
     plt.tight_layout()
     plt.show()
 
+# Modify main function
 def main():
+    # Show instructions first
+    instruction_window = InstructionWindow()
+    if not instruction_window.show():
+        return  # Exit if window was closed without clicking Start
+
     mp_face_mesh = mp.solutions.face_mesh
     face_mesh = mp_face_mesh.FaceMesh(refine_landmarks=True)  # Include puncte iris
     mp_drawing = mp.solutions.drawing_utils
@@ -454,6 +585,10 @@ def main():
     # Creează canvas pentru privire
     gaze_canvas = np.zeros((500, 500, 3), dtype=np.uint8)
 
+    control_window = None
+    if not instruction_window.show_debug.get():
+        control_window = ControlWindow()
+
     with video_capture(source=0) as cap:
         while True:
             ret, frame = cap.read()
@@ -464,10 +599,15 @@ def main():
             process_frame(frame, face_mesh, mp_face_mesh, mp_drawing,
                           mp_drawing_styles, ear_values, running_sum, blink_detector,
                           blink_data, eye_movement_data, gaze_canvas)
-            cv2.imshow(WINDOW_NAME, frame)
 
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
+            if instruction_window.show_debug.get():
+                cv2.imshow(WINDOW_NAME, frame)
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    break
+            else:
+                control_window.update()
+                if not control_window.running:
+                    break
 
     filename = save_blink_data(blink_data)
     plot_blink_analysis(blink_data) # plotam datele
