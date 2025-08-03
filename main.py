@@ -5,7 +5,6 @@ from collections import deque
 from contextlib import contextmanager
 import time
 from datetime import datetime
-# Add new imports
 import matplotlib.pyplot as plt
 import pandas as pd
 from matplotlib.gridspec import GridSpec
@@ -13,6 +12,8 @@ import tkinter as tk
 from tkinter import ttk
 from tkinter import font
 import webbrowser
+import platform
+import os
 
 class InstructionWindow:
     def __init__(self):
@@ -332,7 +333,7 @@ class BlinkDetector:
         
         # Verifică dacă s-a schimbat rata
         rate_changed = self.blink_rate != self.previous_blink_rate
-        self.previous_blink_rate = self.blink_rate  # Update previous blink rate
+        self.previous_blink_rate = self.blink_rate
         
         return rate_changed  # Return whether the blink rate has changed
 
@@ -585,12 +586,34 @@ def main():
     # Creează canvas pentru privire
     gaze_canvas = np.zeros((500, 500, 3), dtype=np.uint8)
 
+    processor_info = platform.processor()
+    if "AMD" in processor_info:
+        processor_brand = "AMD"
+    elif "Intel" in processor_info:
+        processor_brand = "Intel"
+    else:
+        processor_brand = processor_info.split()[0] if processor_info else "Unknown"
+
+    prev_frame_time = 0
+    curr_frame_time = 0
+    fps = 0
+    fps_history = deque(maxlen=30)
+
     control_window = None
     if not instruction_window.show_debug.get():
         control_window = ControlWindow()
 
     with video_capture(source=0) as cap:
         while True:
+            # Calculate FPS
+            curr_frame_time = time.time()
+            if prev_frame_time > 0:
+                fps = 1 / (curr_frame_time - prev_frame_time)
+                fps_history.append(fps)
+            prev_frame_time = curr_frame_time
+
+            avg_fps = sum(fps_history) / len(fps_history) if fps_history else 0
+            
             ret, frame = cap.read()
             if not ret:
                 print("Eroare: Nu s-a putut citi cadrul.")
@@ -601,6 +624,19 @@ def main():
                           blink_data, eye_movement_data, gaze_canvas)
 
             if instruction_window.show_debug.get():
+                height, width = frame.shape[:2]
+
+                fps_text = f"FPS: {avg_fps:.1f}"
+                cv2.putText(frame, fps_text, (width - 150, 30), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2, cv2.LINE_AA)
+
+                webcam_resolution = f"{width}x{height}"
+
+                cv2.putText(frame, f"CPU: {processor_brand}", (width - 150, 60), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2, cv2.LINE_AA)
+                cv2.putText(frame, f"Res: {webcam_resolution}", (width - 150, 90), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2, cv2.LINE_AA)
+                
                 cv2.imshow(WINDOW_NAME, frame)
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                     break
@@ -610,7 +646,7 @@ def main():
                     break
 
     filename = save_blink_data(blink_data)
-    plot_blink_analysis(blink_data) # plotam datele
+    plot_blink_analysis(blink_data)
 
 if __name__ == '__main__':
     main()
