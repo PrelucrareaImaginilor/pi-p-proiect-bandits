@@ -599,6 +599,9 @@ def main():
     fps = 0
     fps_history = deque(maxlen=30)
 
+    inference_time = 0
+    inference_history = deque(maxlen=30)
+
     control_window = None
     if not instruction_window.show_debug.get():
         control_window = ControlWindow()
@@ -619,9 +622,18 @@ def main():
                 print("Eroare: Nu s-a putut citi cadrul.")
                 break
 
+            # Measure inference time - start
+            inference_start_time = time.time()
+            
             process_frame(frame, face_mesh, mp_face_mesh, mp_drawing,
                           mp_drawing_styles, ear_values, running_sum, blink_detector,
                           blink_data, eye_movement_data, gaze_canvas)
+
+            # Measure inference time - end
+            inference_end_time = time.time()
+            inference_time = (inference_end_time - inference_start_time) * 1000
+            inference_history.append(inference_time)
+            avg_inference_time = sum(inference_history) / len(inference_history) if inference_history else 0
 
             if instruction_window.show_debug.get():
                 height, width = frame.shape[:2]
@@ -635,6 +647,8 @@ def main():
                 cv2.putText(frame, f"CPU: {processor_brand}", (width - 150, 60), 
                             cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2, cv2.LINE_AA)
                 cv2.putText(frame, f"Res: {webcam_resolution}", (width - 150, 90), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2, cv2.LINE_AA)
+                cv2.putText(frame, f"Inf: {avg_inference_time:.1f} ms", (width - 150, 120), 
                             cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2, cv2.LINE_AA)
                 
                 cv2.imshow(WINDOW_NAME, frame)
